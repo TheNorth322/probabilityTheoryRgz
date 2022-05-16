@@ -115,8 +115,8 @@ namespace Test
                 for (int j = 0; j < N; j++)
                     if (hist_arr[j] >= left_border && hist_arr[j] < right_border) amount_in_interval++; // кол-во попаданий в диапазон i
 
-                chart1.Series[0].Points.AddXY(i, amount_in_interval / (interval_len * N)); // (interval_len * N)
-                chart1.Series[1].Points.AddXY(i, y[i] / N); // y[i] / N
+                chart1.Series[0].Points.AddXY(i, amount_in_interval / (interval_len * hist_arr.Length)); // (interval_len * N)
+                chart1.Series[1].Points.AddXY(i, y[i] / hist_arr.Length); // y[i] / N
             }
         }
     }
