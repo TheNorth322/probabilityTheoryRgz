@@ -1,52 +1,83 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Test
 {
     public partial class Form1 : Form
     {
-        int N = 1000; // кол-во сгенерированных чисел
-        int INTERVAL_AMOUNT = 20; // кол-во интервалов
-        double M = 0.5; // данные для интервала
-        double SIGMA = 0.1;
+        // Объем выборки
+        public static int N = 1000;
+        // Мат. ожидание
+        double M = 0.5;
+        // Количество интервалов 
+        int INTERVAL_AMOUNT = (int)(1 + Math.Floor(Math.Log(N, 2)));
+        // Среднее квадратическое отклонение
+        double AVG_SQUARE_DEVIATION = 0.16;
+
+        public class InvalidValueException : Exception 
+        {
+            public InvalidValueException() : base() { }
+            public InvalidValueException(string message) : base(message) { }
+            public InvalidValueException(string message, Exception inner) : base(message, inner) { }
+            protected InvalidValueException(System.Runtime.Serialization.SerializationInfo info,
+                System.Runtime.Serialization.StreamingContext context) : base(info, context) { }
+        }
         public Form1()
         {
             InitializeComponent();
         }
+
         private void button1_Click_1(object sender, EventArgs e)
         {
             Microsoft.Office.Interop.Excel.Application excel = new Microsoft.Office.Interop.Excel.Application();
-            
             // Массив значений выборки
             double[] x = new double[N]; 
             Random r = new Random();
-            
-            // Получение k из textBox1
-            double k = Convert.ToDouble(textBox1.Text);
+            double k = 0;
 
-            // заполнение массива выборки
+            // Получение k из textBox1
+            try
+            {
+                k = Convert.ToDouble(textBox1.Text);
+                if (k <= 0)
+                    throw new InvalidValueException("Invalid value of k, must be greater than 0");
+            }
+            catch
+            {
+                MessageBox.Show("Неверное значение k, должно быть больше 0", "Ошибка! Неверное значение",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            chart2.Series[0].Points.Clear();
+            chart2.Series[1].Points.Clear();
+
             for (int i = 0; i < N; i++)
             {
-                x[i] = 0;
-                
-                for (int j = 0; j < INTERVAL_AMOUNT; j++)
+                while (true)
                 {
-                    double randX = r.NextDouble(); 
-                    if (randX >= M - SIGMA * k && randX < M + SIGMA * k) x[i] += randX;
+                    double randX = r.NextDouble();
+
+                    if (randX < M - AVG_SQUARE_DEVIATION * k || randX > M + AVG_SQUARE_DEVIATION * k) continue;
+
+                    double randY = r.NextDouble() * (2.5 - 0) + 0;
+                    double theorY = Math.Exp(-(((randX - M) * (randX - M)) / (2 * AVG_SQUARE_DEVIATION * AVG_SQUARE_DEVIATION)))
+                        / (AVG_SQUARE_DEVIATION * Math.Sqrt(2 * Math.PI));
+
+                    if (randY <= theorY)
+                    {
+                        x[i] = randX;
+                        chart2.Series[0].Points.AddXY(randX, theorY);
+                        chart2.Series[1].Points.AddXY(randX, randY);
+                        break;
+                    }
                 }
             }
-
+            
             double max = x.Max(), min = x.Min();
             
             // Длина интервала
-            double interval_len = (max - min) / INTERVAL_AMOUNT;
+            double intervalLen = (max - min) / INTERVAL_AMOUNT;
             
             // Середины интервалов
             double[] middles = new double[INTERVAL_AMOUNT];
@@ -60,22 +91,19 @@ namespace Test
             // Заполнение массивов середин интервалов и частот
             for (int i = 0; i < INTERVAL_AMOUNT; i++) 
             {
-                int amount_in_interval = 0;
-                double left_border = min + interval_len * i;
-                double right_border = min + interval_len * (i + 1);
+                int amountInInterval = 0;
+                double leftBorder = min + intervalLen * i;
+                double rightBorder = min + intervalLen * (i + 1);
           
                 for (int j = 0; j < x.Length; j++)
-                    if (x[j] >= left_border && x[j] < right_border) amount_in_interval++;
+                    if (x[j] >= leftBorder && x[j] < rightBorder) amountInInterval++;
 
-                frequencies[i] = amount_in_interval / (interval_len);
-                middles[i] = (left_border + right_border) / 2;
+                frequencies[i] = amountInInterval;
+                middles[i] = (leftBorder + rightBorder) / 2;
             }
 
             // Выборочное среднее
             double sampleMean = getSampleMean(middles, frequencies);
-
-            // Среднее квадратическое отклонение
-            double standardDeviation = getDeviation(middles, frequencies, sampleMean);
 
             // Хи квадрат наблюдаемое, кол-во степеней свободы
             double chiSquareSeen = 0, degree = INTERVAL_AMOUNT - 2 - 1;
@@ -90,16 +118,15 @@ namespace Test
             for (int i = 0; i < INTERVAL_AMOUNT; i++)
             {
                 // Значение функции плотности нормального распределения
-                double t = excel.WorksheetFunction.NormDist((middles[i] - sampleMean) / standardDeviation, 0, 1, false);
+                double t = excel.WorksheetFunction.NormDist((middles[i] - sampleMean) / AVG_SQUARE_DEVIATION, 0, 1, false);
 
                 // Теоретические частоты
-                n[i] = interval_len * freqSum / standardDeviation * t;
+                n[i] = intervalLen * freqSum / AVG_SQUARE_DEVIATION * t;
                 chiSquareSeen += (((frequencies[i] - n[i]) * (frequencies[i] - n[i])) / n[i]);
             }
             
             // вывод данных на экран в поля textBox(2-5)
             textBox2.Text = sampleMean.ToString();
-            textBox3.Text = standardDeviation.ToString();
             textBox4.Text = chiSquareSeen.ToString();
             textBox5.Text = chiSquareCrit.ToString();
             
@@ -109,17 +136,9 @@ namespace Test
             else 
                 label7.Text = "Согласно критерию Пирсона генеральная совокупность распределена нормально";
 
-            buildHist(x, n);
-        }
-        double getDeviation(double[] mid, double[] freq, double sampleMean) // ср. квадр. откл
-        {
-            Microsoft.Office.Interop.Excel.Application excel = new Microsoft.Office.Interop.Excel.Application();
-            double deviation = 0;
-            for (int i = 0; i < mid.Length; i++)
-                deviation += mid[i] * mid[i] * freq[i];
-            deviation = Math.Sqrt((deviation / excel.WorksheetFunction.Sum(freq)) - sampleMean * sampleMean);
-
-            return deviation;
+            excel.Quit();
+            buildHist(frequencies, n, intervalLen);
+            
         }
         double getSampleMean(double[] mid, double[] freq) // выбор. среднее
         {
@@ -133,28 +152,16 @@ namespace Test
         }
 
         // Построение гистограммы и нормальной кривой
-        void buildHist(double[] hist, double[] normCurve)
+        void buildHist(double[] histFreq, double[] normCurve, double intervalLen)
         {
             // Очищаем гистограмму
             chart1.Series[0].Points.Clear(); 
             chart1.Series[1].Points.Clear();
-
-            double max = hist.Max(), min = hist.Min();
-            double intervalLen = (max - min) / INTERVAL_AMOUNT;
-            
             // Построение гистограммы
             for (int i = 0; i < INTERVAL_AMOUNT; i++)
             {
-                int amountInInterval = 0;
-                
-                // Границы интервала i
-                double leftBorder = min + intervalLen * i, right_border = min + intervalLen * (i + 1);
-                
-                for (int j = 0; j < N; j++) 
-                    if (hist[j] >= leftBorder && hist[j] < right_border) amountInInterval++;
-
-                chart1.Series[0].Points.AddXY(i, amountInInterval / (intervalLen * hist.Length));
-                chart1.Series[1].Points.AddXY(i, normCurve[i] / hist.Length);
+               chart1.Series[0].Points.AddXY(i, histFreq[i] / intervalLen);
+               chart1.Series[1].Points.AddXY(i, normCurve[i] / intervalLen);
             }
         }
     }
